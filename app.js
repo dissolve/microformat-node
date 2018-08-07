@@ -5,10 +5,10 @@ const Joi = require('joi');
 const Inert = require('inert');
 const Vision = require('vision');
 const Blipp = require('blipp');
-const Request = require('request');
+const RequestPromise = require('request-promise');
+const Handlebars = require('handlebars');
 const Pack = require('./package.json');
 const Microformats = require('./index.js');
-const Handlebars = require('handlebars');
 
 
 const internals = {};
@@ -44,38 +44,20 @@ const rootHandler = (request, h) => {
 
 function parseHTML(request, h) {
 
-    try {
-        var options = buildOptions(request);
-        var mfObj = Microformats.get(options);
-
-        const response = h.response(JSON.stringify(mfObj));
-        response.type('application/json');
-        return response;
-    } catch(err){
-
-        const response = h.response({err: err});
-        response.type('application/json');
-        return response;
-    }
+    return buildOptions(request,h, 'get');
 
 }
 
 
 function countHTML(request, h) {
 
-    var options = buildOptions(request);
-
-    const mfObj = Microformats.count(options);
-
-    const response = h.response(JSON.stringify(mfObj));
-    response.type('application/json');
-    return response;
+    return buildOptions(request,h, 'count');
 }
 
 
 
 // create options from form input
-function buildOptions(request) {
+function buildOptions(request, h, parse_type = 'get') {
 
     let options = {};
     let err = null;
@@ -122,18 +104,36 @@ function buildOptions(request) {
 
     if (request.payload.url !== undefined) {
 
-        Request(request.payload.url, function (error, response, body) {
-
-            err = error;
-            if(!err && response && response.statusCode === 200){
+        return RequestPromise(request.payload.url)
+            .then(function (body) {
                 options.html = body;
-                return options;
-            }else{
-                throw (err);
-            }
-        });
+                if(parse_type == 'count'){
+                    var mfObj = Microformats.count(options);
+                } else {
+                    var mfObj = Microformats.get(options);
+                }
+
+                const response = h.response(JSON.stringify(mfObj));
+                response.type('application/json');
+                return response;
+
+            })
+            .catch(function (err) {
+                const response = h.response({err: err});
+                response.type('application/json');
+                return response;
+
+            });
+        
     }else{
-        return options;
+        if(parse_type == 'count'){
+            var mfObj = Microformats.count(options);
+        } else {
+            var mfObj = Microformats.get(options);
+        }
+        const response = h.response(JSON.stringify(mfObj));
+        response.type('application/json');
+        return response;
     }
 
 }
