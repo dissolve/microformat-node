@@ -8,20 +8,12 @@ const Blipp = require('blipp');
 const Request = require('request');
 const Pack = require('./package.json');
 const Microformats = require('./index.js');
+const Handlebars = require('handlebars');
 
-// Create a server with a host and port
-var server = new Hapi.Server();
 
-server.connection({
-    host: (process.env.PORT) ? '0.0.0.0' : 'localhost',
-    port: parseInt(process.env.PORT, 10) || 3001,
-    router: {
-        stripTrailingSlash: true
-    },
-    routes: { cors: true }
-});
+const internals = {};
 
-var schema = {
+internals.schema = {
     payload: {
         url: Joi.string(),
         html: Joi.string()
@@ -41,41 +33,54 @@ var schema = {
 }
 
 
+const rootHandler = (request, h) => {
 
-
-
-function parseHTML(request, reply) {
-
-    buildOptions(request, (err, options) => {
-
-        if(options){
-            var mfObj = Microformats.get(options);
-            return reply(JSON.stringify(mfObj)).type('application/json');
-        }else{
-            return reply({err: err}).type('application/json');
-        }
+    return h.view('index', {
+        title: Pack.name,
+        version: Pack.version,
     });
+};
+
+
+function parseHTML(request, h) {
+
+    try {
+        var options = buildOptions(request);
+        var mfObj = Microformats.get(options);
+
+        const response = h.response(JSON.stringify(mfObj));
+        response.type('application/json');
+        return response;
+    } catch(err){
+
+        const response = h.response({err: err});
+        response.type('application/json');
+        return response;
+    }
+
 }
 
 
-function countHTML(request, reply) {
+function countHTML(request, h) {
 
-    buildOptions(request, (err, options) => {
+    var options = buildOptions(request);
 
-        const mfObj = Microformats.count(options);
-        return reply(JSON.stringify(mfObj)).type('application/json');
-    });
+    const mfObj = Microformats.count(options);
+
+    const response = h.response(JSON.stringify(mfObj));
+    response.type('application/json');
+    return response;
 }
 
 
 
 // create options from form input
-function buildOptions(request, callback) {
+function buildOptions(request) {
 
     let options = {};
     let err = null;
 
-     if (request.payload.html !== undefined) {
+    if (request.payload.html !== undefined) {
         options.html = request.payload.html.trim();
     }
 
@@ -122,13 +127,13 @@ function buildOptions(request, callback) {
             err = error;
             if(!err && response && response.statusCode === 200){
                 options.html = body;
-                callback(null, options);
+                return options;
             }else{
-                callback(err, null);
+                throw (err);
             }
         });
     }else{
-        callback(err, options);
+        return options;
     }
 
 }
@@ -167,66 +172,66 @@ const goodOptions = {
     }
 }
 
+internals.main = async () => {
 
-// Register plug-in and start
-server.register([
-    Inert,
-    Vision,
-    Blipp,
-    {
-        register: require('good'),
-        options: goodOptions
-    },], function (err) {
-        if (err) {
-            console.error(err);
-        } else {
-            server.start(function () {
-                console.info('Server started at ' + server.info.uri);
-            });
-        }
+    // Create a server with a host and port
+    var server = new Hapi.Server({
+        host: (process.env.PORT) ? '0.0.0.0' : 'localhost',
+        port: parseInt(process.env.PORT, 10) || 3001,
+        router: {
+            stripTrailingSlash: true
+        },
+        routes: { cors: true }
     });
 
-// add templates support with handlebars
-server.views({
-    path: 'templates',
-    engines: { html: require('handlebars') },
-    partialsPath: './templates/withPartials',
-    helpersPath: './templates/helpers',
-    isCached: false
-})
+    // Register plug-in and start
+    await server.register(Inert);
+    await server.register(Vision);
+    await server.register(Blipp)
+    await server.register({plugin: require('good'),
+        options: goodOptions
+        });
 
-// setup routes to serve the test directory and file routes into other modules
-server.route([{
-    method: 'GET',
-    path: '/',
-    config: {
-        handler: (request, reply) => {
-            reply.view('index.html', {
-                title: Pack.name,
-                version: Pack.version,
-            });
+    await server.start()
+    
+    console.info('Server started at ' + server.info.uri);
+
+
+    // add templates support with handlebars
+    server.views({
+        engines: { html: Handlebars },
+        relativeTo: __dirname,
+        path: `templates`
+    });
+
+    // setup routes to serve the test directory and file routes into other modules
+    server.route([{
+        method: 'GET',
+        path: '/',
+        handler: rootHandler,
+    }, {
+        method: 'POST',
+        path: '/parse',
+        config: {
+            handler: parseHTML,
+            validate: internals.schema
         }
-    }
-}, {
-    method: 'POST',
-    path: '/parse',
-    config: {
-        handler: parseHTML,
-        validate: schema
-    }
-}, {
-    method: 'POST',
-    path: '/count',
-    config: {
-        handler: countHTML,
-        validate: schema
-    }
-}, {
-    method: 'GET',
-    path: '/{path*}',
-    handler: {
-        directory: {
-            path: './static'
+    }, {
+        method: 'POST',
+        path: '/count',
+        config: {
+            handler: countHTML,
+            validate: internals.schema
         }
-    }
-}]);
+    }, {
+        method: 'GET',
+        path: '/{path*}',
+        handler: {
+            directory: {
+                path: './static'
+            }
+        }
+    }]);
+};
+
+internals.main();
