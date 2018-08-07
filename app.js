@@ -1,5 +1,4 @@
 'use strict';
-require('dotenv').config();
 const Hapi = require('hapi');
 const Joi = require('joi');
 const Inert = require('inert');
